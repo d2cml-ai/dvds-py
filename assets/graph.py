@@ -39,6 +39,7 @@ def main() -> None:
                 "CR",
                 "BU",
                 "CU",
+                "OR",
                 "OU",
                 "PU",
                 "QU",
