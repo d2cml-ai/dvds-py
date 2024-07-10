@@ -15,20 +15,28 @@ from formulaic import ModelMatrix, model_matrix
 import warnings
 from tqdm import tqdm
 
+def make_cvgroup(
+                size: int,
+                n_group: int,
+                right: bool = True
+) -> np.ndarray:
+        split: np.ndarray = np.random.uniform(0, 1, size = size)
+        split_quantiles: np.ndarray = np.quantile(split, np.arange(0, 1, 1/n_group))
+        cv_groups: np.ndarray = np.digitize(split, bins = split_quantiles, right = right)
+        return cv_groups
+
 def make_cvgroup_balanced(data: pd.DataFrame, K: int, z_column: str) -> np.ndarray:
-        data_indices: np.ndarray = np.array([i for i in range(data.shape[0])])
-        kfold_splitter: KFold = KFold(n_splits = K, shuffle = True)
-        zeros_indices: np.ndarray = data_indices[data[z_column] == 0]
-        ones_indices: np.ndarray = data_indices[data[z_column] == 1]
-        zeros_cv: list[np.ndarray] = [zeros_indices[split[1]] for split in kfold_splitter.split(zeros_indices)]
-        ones_cv: list[np.ndarray] = [ones_indices[split[1]] for split in kfold_splitter.split(ones_indices)]
-        fold_indices: list[np.ndarray] = [
-                np.hstack((array_zeros, array_ones)) 
-                for array_zeros, array_ones in zip(zeros_cv, ones_cv)
-        ]
         cv_folds: np.ndarray = np.zeros(data.shape[0])
-        for index, fold in enumerate(fold_indices):
-                cv_folds[fold] = index
+        cv_folds[data[z_column] == 0] = make_cvgroup(
+                (data[z_column] == 0).sum(),
+                n_group = K,
+                right = False
+        )
+        cv_folds[data[z_column] == 1] = make_cvgroup(
+                (data[z_column] == 1).sum(),
+                n_group = K,
+                right = True
+        )
         return cv_folds
 
 def get_model_matrix(
@@ -63,11 +71,11 @@ def cross_fit_propensities(
         indices_for_keeping: np.ndarray = np.array([True for _ in range(data.shape[0])])
         
         if trim_type == "drop":
-                indices_for_keeping = np.bitwise_and(prop > trim_thresholds[0], prop < trim_thresholds[1])
-                prop[np.bitwise_not(indices_for_keeping)] = 0.5
+                indices_for_keeping = np.logical_and(prop > trim_thresholds[0], prop < trim_thresholds[1])
+                prop[np.logical_not(indices_for_keeping)] = 0.5
         elif trim_type == "clip":
                 prop[prop < trim_thresholds[0]] = trim_thresholds[0]
-                prop[prop < trim_thresholds[1]] = trim_thresholds[1]
+                prop[prop > trim_thresholds[1]] = trim_thresholds[1]
         
         if normalize == "1":
                 mean_value: np.float64 = np.mean(data[indices_for_keeping, z_column] / prop[indices_for_keeping])
@@ -594,8 +602,8 @@ def summarize_results(
                         se_results["1001"],
                         np.std((data[y_column].to_numpy() - influence_function["00"] - data[z_column].to_numpy() * att_plus) / np.mean(data[z_column].to_numpy())) / np.sqrt(data.shape[0]),
                         np.std((data[y_column].to_numpy() - influence_function["01"] - data[z_column].to_numpy() * att_plus) / np.mean(data[z_column].to_numpy())) / np.sqrt(data.shape[0]),
-                        np.std((data[y_column].to_numpy() - influence_function["10"] - (1 - data[z_column].to_numpy()) * atc_plus) / np.mean(data[z_column].to_numpy())) / np.sqrt(data.shape[0]),
-                        np.std((data[y_column].to_numpy() - influence_function["11"] - (1 - data[z_column].to_numpy()) * atc_plus) / np.mean(data[z_column].to_numpy())) / np.sqrt(data.shape[0])
+                        np.std((data[y_column].to_numpy() - influence_function["10"] - (1 - data[z_column].to_numpy()) * atc_plus) / np.mean(1 - data[z_column].to_numpy())) / np.sqrt(data.shape[0]),
+                        np.std((data[y_column].to_numpy() - influence_function["11"] - (1 - data[z_column].to_numpy()) * atc_plus) / np.mean(1 - data[z_column].to_numpy())) / np.sqrt(data.shape[0])
                 ],
                 "sterr_boot": [
                         ci_sd["11"],
@@ -691,7 +699,7 @@ def dvds(
                         "reset_seed": True
                 }
 ) -> pd.DataFrame:
-        
+        data.sort_values(y_column, kind = "stable", inplace = True, ignore_index = True)
         classification: bool = pd.unique(data[y_column]).shape[0] == 2
         cvgroup: np.ndarray = make_cvgroup_balanced(data, K, z_column)
         Lambdas = np.array(Lambdas)
@@ -839,7 +847,7 @@ def dvds(
                 for z in [0, 1]:
                         for t in [0, 1]:
                                 q: np.ndarray = np.zeros((data.shape[0],))
-                                tau = (1 - t + t * lambda_value) / (lambda_value + 1)
+                                tau = ((1 - t) + t * lambda_value) / (lambda_value + 1)
 
                                 if conddist_quant:
                                         q = data[y_column][np.argmax(wc[f"{z}"], 1)].to_numpy()
@@ -869,7 +877,7 @@ def dvds(
                                                         data,
                                                         train_mask,
                                                         cvgroup == fold,
-                                                        form_x,
+                                                        form_x_quant,
                                                         y_column,
                                                         tau,
                                                         **options_quant
@@ -901,7 +909,7 @@ def dvds(
                                                         data,
                                                         train_mask,
                                                         cvgroup == fold,
-                                                        form_x,
+                                                        form_x_kappa,
                                                         "_hinge",
                                                         **options_regn
                                                 )
