@@ -8,23 +8,41 @@ from sklearn.svm import SVC, SVR
 from quantile_forest import RandomForestQuantileRegressor
 from tqdm import tqdm
 import pandas as pd
-from strategies import (
-        BinaryConstRegression, ConstQuantile, BinaryQuantileExtrapolator, 
-        ContinuousConstRegression, BinaryKappaExtrapolator,
-        DVDSBinaryStrategy, DVDSContinuousStrategy
-)
+from strategies import BinaryConstRegression, BinaryKappaExtrapolator, BinaryQuantileExtrapolator, DVDSBinaryStrategy, DVDSContinuousStrategy
 
 class DVDSBoundsEstimator:
+        """
+        Context class for estimation of doubly-valid, doubly-sharp bounds.
+        # Parameters:
+                - `Lambdas: NDArray[np.float64] | list[float]`: List or 1-D array of values for the magnitude of the effect of a hypothetical confounder.
+                - `outcome_estimation_type: Literal["binary", "continuous", "kernel"] = "binary"`: Estimation strategy for the bounds. For the estimation of quantiles and transformed outcomes:
+                        * "binary" uses binary extrapolation through the `BinaryQuantileExtrapolator` and the `BinaryKappaExtrapolator` classes;
+                        * "continuous" uses continuous variable regression and prediction methods with a `.fit()` and `.predict()` method, as in the scikit-learn package; and
+                        * "kernel" uses kernel weights, either from a random forest estimator or from the features' covariance matrix
+                - `propensities_method: Any = LogisticRegression()`: Binary regressor for treatment propensity estimation.
+                - `quantiles_method: Any = BinaryQuantileExtrapolator()`: Regressor for estimating outcome quantiles.
+                - `regression_method:  Any = BinaryKappaExtrapolator()`: Regressor for estimating transformed outcomes.
+                - `kernel_distance_method: Any = None`: Method for computing kernel weights. Only used when `outcome_estimation_type = "kernel"`.
+                - `muhat_method: Any = LogisticRegression()`: Regressor for cross-fit predictions of the outcome. Only used when `outcome_estimation_type = "binary"`.
+                - `K: int = 5`: Number of folds for cross-fitting
+                - `semiadaptive: bool = False`: Whether to use the same folds to fit the quantiles and the transformed outcomes. Requires K >= 5 and odd.
+                - `trim_type: Literal["clip", "drop"] | None = "clip"`: Method for trimming the estimated propensities:
+                        * "clip" winzorizes the propensities,
+                        * "drop" drops the observations with propensities outside of the interval
+                - `trim_thresholds: tuple[float, float] = (0.01, 0.99)`: Interval for the trimming procedure.
+                - `normalization: Literal["0", "1"] | None = None`: Normalize propensities when "0" or "1". 
+                - `stabilization: bool = False`: # TODO
+        """
 
         def __init__(
                         self,
                         Lambdas: NDArray[np.float64] | list[float],
                         outcome_estimation_type: Literal["binary", "continuous", "kernel"] = "binary",
-                        propensities_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression = LogisticRegression(),
-                        quantiles_method: QuantileRegressor | RandomForestQuantileRegressor | ConstQuantile | BinaryQuantileExtrapolator | None = None,
-                        regression_method:  LinearRegression | RandomForestRegressor | SVR | GradientBoostingRegressor | ContinuousConstRegression | BinaryKappaExtrapolator | None = None,
-                        kernel_distance_method: None = None, #ForestKernelDistance | KernelDistance
-                        muhat_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression | None = None,
+                        propensities_method: Any = LogisticRegression(),
+                        quantiles_method: Any = BinaryQuantileExtrapolator(),
+                        regression_method:  Any = BinaryKappaExtrapolator(),
+                        kernel_distance_method: Any = None, #ForestKernelDistance | KernelDistance
+                        muhat_method: Any = LogisticRegression(),
                         K: int = 5,
                         semiadaptive: bool = False,
                         trim_type: Literal["clip", "drop"] | None = "clip",
@@ -32,9 +50,11 @@ class DVDSBoundsEstimator:
                         normalization: Literal["0", "1"] | None = None,
                         stabilization: bool = False
         ) -> None:
+                if (not semiadaptive) and ((K < 5) or (K % 2 == 0)):
+                        raise ValueError("For non-semiadaptive cross-fitting, K must be greater than or equal to 5, and it must be odd")
+                
                 if trim_thresholds[0] > trim_thresholds[1]:
-                        raise ValueError("Thresholds for trimming must be in \
-                                         ascending order")
+                        raise ValueError("Thresholds for trimming must be in ascending order")
                 
                 self.Lambdas = Lambdas
                 self.outcome_estimation_type = outcome_estimation_type

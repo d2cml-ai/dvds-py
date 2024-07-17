@@ -94,7 +94,7 @@ def cross_fit_propensities(
                 X: NDArray[Any],
                 Z: NDArray[np.int8],
                 cv_groups: NDArray[np.int8],
-                propensities_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression,
+                propensities_method: Any,
                 trim_thresholds: tuple[float, float],
                 trim_type: Literal["clip", "drop"] | None,
                 normalize: Literal["0", "1"] | None
@@ -108,7 +108,7 @@ def cross_fit_propensities(
                         X[train_mask],
                         Z[train_mask]
                 )
-                prop[test_mask] = propensities_method.predict_proba(X[test_mask])[:, 1]
+                prop[test_mask] = propensities_method.predict_proba(X[test_mask])[:, 1].ravel()
         
         indices_for_keeping: np.ndarray = np.array([True] * prop.shape[0])
 
@@ -130,7 +130,7 @@ class BootstrapIterationResults:
                         X: NDArray,
                         Z: NDArray[np.int8],
                         K: int,
-                        propensities_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression,
+                        propensities_method: Any,
                         refit_propensities: bool,
                         trim_thresholds: tuple[float, float],
                         trim_type: Literal["clip", "drop"] | None,
@@ -354,11 +354,11 @@ class DVDSBinaryStrategy(DVDSStrategy):
         def __init__(
                         self,
                         Lambdas: NDArray[np.float64] | list[float],
-                        propensities_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression,
-                        quantiles_method: QuantileRegressor | RandomForestQuantileRegressor | ConstQuantile | BinaryQuantileExtrapolator | None,
-                        regression_method: LinearRegression | RandomForestRegressor | SVR | GradientBoostingRegressor | ContinuousConstRegression | BinaryKappaExtrapolator | None,
-                        kernel_distance_method: None, #ForestKernelDistance | KernelDistance
-                        muhat_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression | None,
+                        propensities_method: Any,
+                        quantiles_method: Any,
+                        regression_method: Any,
+                        kernel_distance_method: Any, #ForestKernelDistance | KernelDistance
+                        muhat_method: Any,
                         K: int,
                         semiadaptive: bool,
                         trim_type: Literal["clip", "drop"] | None,
@@ -373,7 +373,7 @@ class DVDSBinaryStrategy(DVDSStrategy):
                 ):
                         raise ValueError('"quantiles_method" and "regression_method" must both be of class "BinaryQuantileExtrapolator" and "BinaryKappaExtrapolator" respectively')
                 
-                if not isinstance(muhat_method, LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression):
+                if muhat_method is None:
                         raise ValueError('For estimation of binary outcomes, a binary regression method must be provided for "muhat_method"')
                 
                 self.Lambdas = np.array(Lambdas)
@@ -406,11 +406,11 @@ class DVDSBinaryStrategy(DVDSStrategy):
                 for z in [0, 1]:
                         for t in [0, 1]:
                                 tau: np.float64 = ((1 - t) + t * lambda_value) / (lambda_value + 1)
-                                q: NDArray[np.int8] = self.quantiles_method.predict(tau, muhat_results[z])
+                                q: NDArray[np.int8] = self.quantiles_method.predict(tau, muhat_results[z]).ravel()
                                 _hinge: NDArray[np.float64] = q + lambda_value ** np.sign((2 * t - 1) * (y - q)) * y - q
                                 kappa: NDArray[np.float64] = self.regression_method.predict(
                                         tau, muhat_results[z], self.quantiles_method.prediction
-                                )
+                                ).ravel()
                                 zz: NDArray[np.int8] = (2 * z - 1) * Z + (1 - z)
                                 ee: NDArray[np.float64] = (2 * z - 1) * self.propensities + (1 - z)
 
@@ -510,7 +510,7 @@ class DVDSBinaryStrategy(DVDSStrategy):
                                         semiadaptive = self.semiadaptive
                                 )
                                 self.muhat_method.fit(X[train_mask], y[train_mask])
-                                muhat_results[z_value][test_mask] = self.muhat_method.predict_proba(X[test_mask])[:, 1]
+                                muhat_results[z_value][test_mask] = self.muhat_method.predict_proba(X[test_mask])[:, 1].ravel()
                 
                 bootstrap_data: list[BootstrapIterationResults] | None = None
                 if bootstrap:
@@ -552,11 +552,11 @@ class DVDSContinuousStrategy(DVDSStrategy):
         def __init__(
                         self,
                         Lambdas: NDArray[np.float64] | list[float],
-                        propensities_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression,
-                        quantiles_method: QuantileRegressor | RandomForestQuantileRegressor | ConstQuantile | BinaryQuantileExtrapolator | None,
-                        regression_method: LinearRegression | RandomForestRegressor | SVR | GradientBoostingRegressor | ContinuousConstRegression | BinaryKappaExtrapolator | None,
-                        kernel_distance_method: None, #ForestKernelDistance | KernelDistance,
-                        muhat_method: LogisticRegression | RandomForestClassifier | SVC | GradientBoostingClassifier | BinaryConstRegression | None,
+                        propensities_method: Any,
+                        quantiles_method: Any,
+                        regression_method: Any,
+                        kernel_distance_method: Any, #ForestKernelDistance | KernelDistance,
+                        muhat_method: Any,
                         K: int,
                         semiadaptive: bool,
                         trim_type: Literal["clip", "drop"] | None,
@@ -615,7 +615,7 @@ class DVDSContinuousStrategy(DVDSStrategy):
                                                 pretrained_forest: RandomForestQuantileRegressor = self.pretrained_forests[f"{fold}{z}"]
                                                 q[test_mask] = pretrained_forest.predict(
                                                         X_quant[test_mask], quantiles = tau
-                                                )
+                                                ).ravel()
                                         except AttributeError:
                                                 self.quantiles_method.default_quantiles = tau #type:ignore
                                                 self.quantiles_method.quantile = tau #type:ignore
@@ -623,7 +623,7 @@ class DVDSContinuousStrategy(DVDSStrategy):
                                                         X_quant[train_mask], 
                                                         y[train_mask]
                                                 )
-                                                q[test_mask] = self.quantiles_method.predict(X_quant[test_mask])
+                                                q[test_mask] = self.quantiles_method.predict(X_quant[test_mask]).ravel()
                                 
                                 kappa: NDArray[np.float64] = np.zeros(self.sample_size)
                                 _hinge: NDArray[np.float64]
@@ -636,7 +636,7 @@ class DVDSContinuousStrategy(DVDSStrategy):
                                                 semiadaptive = self.semiadaptive
                                         )
                                         self.regression_method.fit(X_kappa[train_mask], _hinge[train_mask])
-                                        kappa[test_mask] = self.regression_method.predict(X_kappa[test_mask])
+                                        kappa[test_mask] = self.regression_method.predict(X_kappa[test_mask]).ravel()
 
                                 zz: NDArray[np.int8] = (2 * z - 1) * Z + (1 - z)
                                 ee: NDArray[np.float64] = (2 * z - 1) * self.propensities + (1 - z)
